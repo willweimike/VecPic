@@ -1,18 +1,6 @@
 import SwiftUI
 import PhotosUI
 
-//enum ColorMode: String, CaseIterable {
-//    case bw = "bw"
-//    case color = "color"
-//}
-//
-//enum FittingMode: String, CaseIterable {
-//    case pixel = "pixel"
-//    case polygon = "polygon"
-//    case spline = "spline"
-//}
-
-
 
 enum Presets: String, CaseIterable {
     case bw = "bw"
@@ -26,59 +14,59 @@ struct ContentView: View {
     @State var selectedUIImage: UIImage?
     @State var selectedMode: Presets = .photo
     @State var isProcessing = false
+    @State var errMessage: String? = nil
+    @State var resultImage: UIImage? = nil
     
     var body: some View {
-        
-        imageDisplaySection
-//
-    }
-    
-    private var imageDisplaySection: some View {
-        Group {
-            VStack(spacing: 20) {
-                if let selectedImage {
-                    selectedImage
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 300)
-                }
-                else {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.5))
-                        .frame(height: 300)
-                        .overlay(Text("No Image Selected"))
-                }
-                if selectedImage == nil {
-                    photoPickerSection
-                }
-                
-                if selectedImage != nil {
-                    modeSelectionSection
-                    
-                    confirmButton
-                }
-            }
-            .onChange(of: selectPhoto) { newItem in
-                Task {
-                    await loadImage(from: newItem)
-                }
-            }
+        VStack(spacing: 20) {
+            if let resultImage {
+                Image(uiImage: resultImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 300)
 
+//                    resultOptions
+            }
+            else if let selectedImage {
+                selectedImage
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 300)
+                modeSelectionSection
+                confirmButton
+            }
+            else {
+                photoPickerSection
+            }
+            
         }
+        .onChange(of: selectPhoto) { newItem in
+            Task {
+                await loadImage(from: newItem)
+            }
+        }
+        
     }
-    
     
     private var photoPickerSection: some View {
         Group{
-            PhotosPicker(selection: $selectPhoto, matching: .images) {
-                Text("Select Photo")
-                    .frame(maxWidth: /*@START_MENU_TOKEN@*/.infinity/*@END_MENU_TOKEN@*/)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
+            VStack {
+                Rectangle()
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(height: 300)
+                    .overlay(Text("No Image Selected"))
+                    .padding(.bottom)
+                PhotosPicker(selection: $selectPhoto, matching: .images) {
+                    Text("Select Photo")
+                        .frame(maxWidth: /*@START_MENU_TOKEN@*/.infinity/*@END_MENU_TOKEN@*/)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .padding(.top)
+                }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
         }
     }
     
@@ -99,15 +87,15 @@ struct ContentView: View {
             Button(action: {
                 confirmAndProcess()
             }) {
-                Text("Confirm")
+                Text(isProcessing ? "Processing" : "Submit")
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
+                    .background(isProcessing ? Color.gray : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(10)
             }
             .padding()
-            .disabled(isProcessing)
+            .disabled(isProcessing || selectedImage == nil)
         }
     }
     
@@ -126,14 +114,57 @@ struct ContentView: View {
     }
     
     private func confirmAndProcess() {
-        guard let image = selectedImage else { return }
+        guard let inputImage = selectedUIImage else { return }
         isProcessing = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        errMessage = nil
+        guard let imgData = inputImage.jpegData(compressionQuality: 1.0) else {
+            errMessage = "Failed to encode image"
             isProcessing = false
-            print("Process Complete")
+            return
         }
+        
+        var request = URLRequest(url: URL(string: "http://localhost:9000/tracing")!)
+        let boundary = UUID().uuidString
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"input.jpg\"\r\n".data(using: .utf8)!)
+        body.append(selectedMode.rawValue.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
+            DispatchQueue.main.async {
+                isProcessing = false
+                if let error {
+                    errMessage = "Network Error"
+                    return
+                }
+                guard let data = data, let processedImage = UIImage(data: data) else {
+                    errMessage = "Invalid server response"
+                    return
+                }
+                resultImage = processedImage
+            }
+        }.resume()
+        
+    }
+//    private func resultOptions() {
+//        
+//    }
+    
+    private func saveResult() {
+        guard let resultImage else {return}
+        UIImageWriteToSavedPhotosAlbum(resultImage, nil, nil, nil)
     }
     
+    private func resetParams() {
+        selectedImage = nil
+        selectedUIImage = nil
+        resultImage = nil
+        errMessage = nil
+    }
 }
 
 // Speckle filter options enum
