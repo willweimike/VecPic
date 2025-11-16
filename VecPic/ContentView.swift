@@ -1,210 +1,339 @@
 import SwiftUI
 import PhotosUI
+import WebKit
+import Combine
 
 
-enum Presets: String, CaseIterable {
+enum ProcessingMode: String, CaseIterable {
     case color = "color"
     case binary = "binary"
 }
 
+// Main Content View
 struct ContentView: View {
-    @State var selectPhoto: PhotosPickerItem?
-    @State var selectedUIImage: UIImage?
-    @State var selectedMode: Presets = .color
-    @State var isProcessing = false
-    @State var errMessage: String? = nil
-    @State var resultImage: UIImage? = nil
+    @StateObject private var viewModel = ImageProcessingViewModel()
     
     var body: some View {
-        VStack(spacing: 20) {
-            if let resultImage {
-                Image(uiImage: resultImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 300)
-                HStack(spacing: 20) {
-                    saveButton
-                    resetAllButton
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Image Display Section
+                    imageDisplaySection
+                    
+                    // Photo Picker Button
+                    photoPickerButton
+                    
+                    // Mode Selection
+                    if viewModel.selectedUIImage != nil && viewModel.svgContent == nil {
+                        modeSelectionSection
+                        processButton
+                    }
+                    
+                    // SVG Result Display
+                    if let svgContent = viewModel.svgContent {
+                        svgDisplaySection(svgContent: svgContent)
+                        HStack(spacing: 15) {
+                            saveResult
+                            resetAll
+                        }
+                    }
+                    
+                    // Error Message
+                    if let errMessage = viewModel.errMessage {
+                        Text(errMessage)
+                            .foregroundColor(.red)
+                            .padding()
+                            .background(Color.red)
+                            .cornerRadius(8)
+                    }
                 }
-
+                .padding()
             }
-            else if let selectedUIImage {
+            .navigationTitle("VecPic")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    // View Components
+    
+    private var imageDisplaySection: some View {
+        Group {
+            if let selectedUIImage = viewModel.selectedUIImage, viewModel.svgContent == nil {
                 Image(uiImage: selectedUIImage)
                     .resizable()
                     .scaledToFit()
+                    .frame(maxHeight: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(radius: 5)
+            } else if viewModel.svgContent == nil {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.gray.opacity(0.2))
                     .frame(height: 300)
-                modeSelectionSection
-                HStack(spacing: 20) {
-                    confirmButton
-                    resetAllButton
-                }
-            }
-            else {
-                photoPickerSection
-            }
-            
-        }
-        .onChange(of: selectPhoto) { newItem in
-            Task {
-                await loadImage(from: newItem)
+                    .overlay(
+                        Text("No Image Selected")
+                            .foregroundColor(.gray)
+                    )
             }
         }
-        
     }
     
-    private var photoPickerSection: some View {
-        Group{
-            VStack {
-                Rectangle()
-                    .fill(Color.gray.opacity(0.5))
-                    .frame(height: 300)
-                    .overlay(Text("No Image Selected"))
-                    .padding(.bottom)
-                PhotosPicker(selection: $selectPhoto, matching: .images) {
-                    Text("Select Photo")
-                        .frame(maxWidth: /*@START_MENU_TOKEN@*/.infinity/*@END_MENU_TOKEN@*/)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                        .padding(.top)
-                }
-                .padding(.horizontal)
+    private var photoPickerButton: some View {
+        PhotosPicker(
+            selection: $viewModel.selectedPhoto,
+            matching: .images,
+            label: {
+                Text( "Select Image")
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-        }
+        )
     }
     
     private var modeSelectionSection: some View {
-        Group {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Select Mode", selection: $selectedMode) {
-                    ForEach(Presets.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Processing Mode")
+                .font(.headline)
+            
+            Picker("Mode", selection: $viewModel.selectedMode) {
+                ForEach(ProcessingMode.allCases, id: \.self) { mode in
+                    Text("\(mode.rawValue)").tag(mode)
                 }
-            }.pickerStyle(.wheel)
-        }
-    }
-    private var processButton: some View {
-        Group {
-            Button(action: confirmAndProcess) {
-                Text(isProcessing ? "Processing" : "Submit")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(isProcessing ? Color.gray : Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .disabled(isProcessing || selectedUIImage == nil)
+            .pickerStyle(.segmented)
         }
-        .padding()
     }
-//
-    private var confirmButton: some View {
+    
+    private var processButton: some View {
+        Button(action: {
+            Task {
+                await viewModel.sendToBackend()
+            }
+        }) {
+            Text(viewModel.isProcessing ? "Processing" : "Submit")
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(viewModel.isProcessing ? Color.gray : Color.green)
+            .foregroundColor(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .disabled(viewModel.isProcessing)
+    }
+    
+    private func svgDisplaySection(svgContent: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Result")
+                .font(.headline)
+            
+            SVGWebView(svgContent: svgContent)
+                .frame(height: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(radius: 5)
+        }
+    }
+
+    
+    private var saveResult: some View {
+        Button(action: {
+            viewModel.saveSVG()
+        }) {
+            Label("Save", systemImage: "square.and.arrow.down.fill")
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+    
+    private var resetAll: some View {
         Group {
             Button(action: {
-                confirmAndProcess()
+                viewModel.retry()
             }) {
-                Text(isProcessing ? "Processing" : "Submit")
+                Label("Retry", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(isProcessing ? Color.gray : Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
-            }
-            .padding()
-            .disabled(isProcessing || selectedUIImage == nil)
-        }
-    }
-    
-    private var saveButton: some View {
-        Group {
-            Button(action: saveResult) {
-                Label("Save", systemImage: "square.and.arrow.down")
-                    .padding()
-                    .background(Color.blue)
+                    .background(Color.orange)
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .padding()
         }
     }
+}
+
+// View Model
+@MainActor
+class ImageProcessingViewModel: ObservableObject {
+    @Published var selectedPhoto: PhotosPickerItem? = nil
+    @Published var selectedUIImage: UIImage? = nil
+    @Published var selectedMode: ProcessingMode = .color
+    @Published var isProcessing = false
+    @Published var svgContent: String? = nil
+    @Published var errMessage: String? = nil
+    @Published var originalFilename: String = ""
     
-    private var resetAllButton: some View {
-        Group {
-            Button(action: resetAll) {
-                Label("Retry", systemImage: "arrow.clockwise")
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+    init() {
+        // Observe photo selection changes
+        $selectedPhoto
+            .sink { [weak self] newItem in
+                Task { @MainActor in
+                    await self?.loadImage(from: newItem)
+                }
             }
-            .padding()
-        }
+            .store(in: &cancellables)
     }
     
+    private var cancellables = Set<AnyCancellable>()
     
-    private func loadImage(from item: PhotosPickerItem?) async {
+    func loadImage(from item: PhotosPickerItem?) async {
         guard let item = item else { return }
+        
         selectedUIImage = nil
-        resultImage = nil
+        svgContent = nil
         errMessage = nil
-        Task {
-            if let data = try? await item.loadTransferable(type: Data.self),
+        
+        do {
+            if let data = try await item.loadTransferable(type: Data.self),
                let uiImage = UIImage(data: data) {
-                    selectedUIImage = uiImage
+                selectedUIImage = uiImage
+                // Try to get original filename
+                if let identifier = item.itemIdentifier {
+                    originalFilename = identifier
+                } else {
+                    originalFilename = "image.jpg"
+                }
             }
+        } catch {
+            errMessage = "Failed to load image"
         }
     }
     
-    private func confirmAndProcess() {
-        guard let inputImage = selectedUIImage else { return }
+    func sendToBackend() async {
+        guard let uiImage = selectedUIImage else {
+            errMessage = "No image to process"
+            return
+        }
+        
         isProcessing = true
         errMessage = nil
-        guard let imgData = inputImage.jpegData(compressionQuality: 1.0) else {
+        
+        // Convert UIImage to JPEG
+        guard let imageData = uiImage.jpegData(compressionQuality: 1) else {
             errMessage = "Failed to encode image"
             isProcessing = false
             return
         }
         
-        var request = URLRequest(url: URL(string: "http://localhost:9000/vecpic/")!)
+        // Create multipart form data
         let boundary = UUID().uuidString
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:5000/vecpic")!)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
         var body = Data()
+        
+        // Add image file
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"input.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(originalFilename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n".data(using: .utf8)!)
+        
+        // Add preset (color mode)
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"colormode\"\r\n\r\n".data(using: .utf8)!)
         body.append(selectedMode.rawValue.data(using: .utf8)!)
         body.append("\r\n".data(using: .utf8)!)
+        
+        // Add filename
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"filename\"\r\n\r\n".data(using: .utf8)!)
+        body.append(originalFilename.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+        
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         
-        URLSession.shared.uploadTask(with: request, from: body) { data, response, error in
-            DispatchQueue.main.async {
+        do {
+            let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                errMessage = "Invalid server response"
                 isProcessing = false
-                if let error {
-                    errMessage = "Network Error"
-                    return
-                }
-                guard let data = data, let processedImage = UIImage(data: data) else {
-                    errMessage = "Invalid server response"
-                    return
-                }
-                resultImage = processedImage
+                return
             }
-        }.resume()
+            
+            if httpResponse.statusCode == 200 {
+                if let svgString = String(data: data, encoding: .utf8) {
+                    svgContent = svgString
+                    errMessage = nil
+                } else {
+                    errMessage = "Failed to parse SVG response"
+                }
+            } else {
+                errMessage = "Server error"
+            }
+        } catch {
+            errMessage = "Network error"
+        }
         
+        isProcessing = false
     }
     
-    private func saveResult() {
-        guard let resultImage else {return}
-        UIImageWriteToSavedPhotosAlbum(resultImage, nil, nil, nil)
+    func saveSVG() {
+        guard let svgContent = svgContent else { return }
+        
+        // Save to Files app
+        let tempURL = FileManager
+            .default
+            .temporaryDirectory
+            .appendingPathComponent("converted_\(Date().timeIntervalSince1970).svg")
+        
+        do {
+            try svgContent.write(to: tempURL, atomically: true, encoding: .utf8)
+            
+            // Present share sheet
+            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let rootVC = windowScene.windows.first?.rootViewController {
+                rootVC.present(activityVC, animated: true)
+            }
+            
+            errMessage = "SVG ready to save"
+        } catch {
+            errMessage = "Failed to save"
+        }
     }
     
-    private func resetAll() {
+    func retry() {
         selectedUIImage = nil
-        selectPhoto = nil
-        resultImage = nil
+        selectedPhoto = nil
+        svgContent = nil
         errMessage = nil
     }
 }
 
+// SVG Web View
+struct SVGWebView: UIViewRepresentable {
+    let svgContent: String
+    
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.scrollView.isScrollEnabled = false
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        return webView
+    }
+    
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.loadHTMLString(svgContent, baseURL: nil)
+    }
+}
+
+#Preview {
+    ContentView()
+}
