@@ -3,16 +3,14 @@ import PhotosUI
 
 
 enum Presets: String, CaseIterable {
-    case bw = "bw"
-    case poster = "poster"
-    case photo = "photo"
+    case color = "color"
+    case binary = "binary"
 }
 
 struct ContentView: View {
-    @State var selectedImage: Image?
     @State var selectPhoto: PhotosPickerItem?
     @State var selectedUIImage: UIImage?
-    @State var selectedMode: Presets = .photo
+    @State var selectedMode: Presets = .color
     @State var isProcessing = false
     @State var errMessage: String? = nil
     @State var resultImage: UIImage? = nil
@@ -24,16 +22,22 @@ struct ContentView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(height: 300)
+                HStack(spacing: 20) {
+                    saveButton
+                    resetAllButton
+                }
 
-//                    resultOptions
             }
-            else if let selectedImage {
-                selectedImage
+            else if let selectedUIImage {
+                Image(uiImage: selectedUIImage)
                     .resizable()
                     .scaledToFit()
                     .frame(height: 300)
                 modeSelectionSection
-                confirmButton
+                HStack(spacing: 20) {
+                    confirmButton
+                    resetAllButton
+                }
             }
             else {
                 photoPickerSection
@@ -73,15 +77,29 @@ struct ContentView: View {
     private var modeSelectionSection: some View {
         Group {
             VStack(alignment: .leading, spacing: 8) {
-            Picker("Select Mode", selection: $selectedMode) {
-                Text("Normal Image (RGB)").tag("photo")
-                Text("Large Image (RGB)").tag("poster")
-                Text("Black and White").tag("bw")
+                Picker("Select Mode", selection: $selectedMode) {
+                    ForEach(Presets.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
             }.pickerStyle(.wheel)
         }
     }
-//    
+    private var processButton: some View {
+        Group {
+            Button(action: confirmAndProcess) {
+                Text(isProcessing ? "Processing" : "Submit")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(isProcessing ? Color.gray : Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isProcessing || selectedUIImage == nil)
+        }
+        .padding()
+    }
+//
     private var confirmButton: some View {
         Group {
             Button(action: {
@@ -95,21 +113,47 @@ struct ContentView: View {
                     .cornerRadius(10)
             }
             .padding()
-            .disabled(isProcessing || selectedImage == nil)
+            .disabled(isProcessing || selectedUIImage == nil)
+        }
+    }
+    
+    private var saveButton: some View {
+        Group {
+            Button(action: saveResult) {
+                Label("Save", systemImage: "square.and.arrow.down")
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .padding()
+        }
+    }
+    
+    private var resetAllButton: some View {
+        Group {
+            Button(action: resetAll) {
+                Label("Retry", systemImage: "arrow.clockwise")
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .padding()
         }
     }
     
     
     private func loadImage(from item: PhotosPickerItem?) async {
         guard let item = item else { return }
-        // for display
-        if let image = try? await item.loadTransferable(type: Image.self) {
-            selectedImage = image
-        }
-        // for processing
-        if let data = try? await item.loadTransferable(type: Data.self),
-           let uiImage = UIImage(data: data) {
-                selectedUIImage = uiImage
+        selectedUIImage = nil
+        resultImage = nil
+        errMessage = nil
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self),
+               let uiImage = UIImage(data: data) {
+                    selectedUIImage = uiImage
+            }
         }
     }
     
@@ -123,7 +167,7 @@ struct ContentView: View {
             return
         }
         
-        var request = URLRequest(url: URL(string: "http://localhost:9000/tracing")!)
+        var request = URLRequest(url: URL(string: "http://localhost:9000/vecpic/")!)
         let boundary = UUID().uuidString
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -150,22 +194,17 @@ struct ContentView: View {
         }.resume()
         
     }
-//    private func resultOptions() {
-//        
-//    }
     
     private func saveResult() {
         guard let resultImage else {return}
         UIImageWriteToSavedPhotosAlbum(resultImage, nil, nil, nil)
     }
     
-    private func resetParams() {
-        selectedImage = nil
+    private func resetAll() {
         selectedUIImage = nil
+        selectPhoto = nil
         resultImage = nil
         errMessage = nil
     }
 }
-
-// Speckle filter options enum
 
