@@ -1,7 +1,5 @@
 # VecPic: Turn Raster Graphics into SVG 
 
-> Because I am a student, I could not afford the fee of Apple Developer, so the binary is not code-signed.
-
 <img width="256" height="256" alt="my-image" src="https://github.com/willweimike/VecPic/blob/main/images/icon.jpg" />
 
 ## Build upon open source. Free Forever
