@@ -8,11 +8,10 @@
 This project leverages the power of [VTracer](https://github.com/visioncortex/vtracer), which is built with Rust. However, official VTracer uses command line as UI, which is not very comfortable for normal users.
 Therefore, I made this project!
 
+**VecPic**: iOS app as frontend for user.
+
+**VecPicServer**: A backend server which is built with REST API design. Running on local machine.
+
 ## Live Demo 
 
 https://github.com/user-attachments/assets/48684366-054b-44e7-b335-cf2765d72040
-
-
-
-## Structure of This Project
-
