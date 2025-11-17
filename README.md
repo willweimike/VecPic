@@ -14,4 +14,5 @@ Therefore, I made this project!
 
 ## Live Demo 
 
-https://github.com/user-attachments/assets/48684366-054b-44e7-b335-cf2765d72040
+https://github.com/user-attachments/assets/c9a2d521-fe05-4447-a594-c7c96eb78b2f
+
